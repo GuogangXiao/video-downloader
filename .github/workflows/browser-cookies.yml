@@ -1,8 +1,5 @@
 name: Refresh YouTube Cookies
 
-# 手动触发：Actions -> Refresh YouTube Cookies -> Run workflow
-# 云端用真实浏览器访问 YouTube 获取游客身份 cookies，
-# 自动写入仓库 Secrets（YTDLP_COOKIES），主下载流程会自动使用。
 on:
   workflow_dispatch:
 
@@ -17,80 +14,76 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Fetch YouTube cookies
-        run: python - <<'EOF'
-import json
-from playwright.sync_api import sync_playwright
+        run: |
+          python - <<'PYEOF'
+          import json
+          from playwright.sync_api import sync_playwright
 
-ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+          ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
-    ctx = browser.new_context(
-        user_agent=ua,
-        locale="en-US",
-        viewport={"width": 1280, "height": 720},
-    )
-    page = ctx.new_page()
-    try:
-        page.goto("https://www.youtube.com/", wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(10000)  # 让 JS 运行，种下游客 cookie
-    except Exception as e:
-        print("WARN: 页面导航异常:", e)
-    cookies = ctx.cookies()
-    browser.close()
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-blink-features=AutomationControlled"])
+              ctx = browser.new_context(
+                  user_agent=ua,
+                  locale="en-US",
+                  viewport={"width": 1280, "height": 720},
+              )
+              page = ctx.new_page()
+              try:
+                  page.goto("https://www.youtube.com/", wait_until="domcontentloaded", timeout=60000)
+                  page.wait_for_timeout(10000)
+              except Exception as e:
+                  print("WARN: 页面导航异常:", e)
+              cookies = ctx.cookies()
+              browser.close()
 
-if not cookies:
-    raise SystemExit("未获取到任何 cookie")
+          if not cookies:
+              raise SystemExit("未获取到任何 cookie")
 
-# 转成 yt-dlp 需要的 Netscape 格式
-lines = ["# Netscape HTTP Cookie File", "# HttpOnly_", ""]
-for c in cookies:
-    # 域名去掉前导点；secure 转 TRUE/FALSE
-    domain = c["domain"].lstrip(".")
-    secure = "TRUE" if c.get("secure") else "FALSE"
-    exp = int(c.get("expires", 0)) or 0
-    lines.append(f"{domain}\tTRUE\t{c['path']}\t{secure}\t{exp}\t{c['name']}\t{c['value']}")
-cookie_text = "\n".join(lines)
-with open("cookies.txt", "w", encoding="utf-8") as f:
-    f.write(cookie_text)
+          lines = ["# Netscape HTTP Cookie File", "# HttpOnly_", ""]
+          for c in cookies:
+              domain = c["domain"].lstrip(".")
+              secure = "TRUE" if c.get("secure") else "FALSE"
+              exp = int(c.get("expires", 0)) or 0
+              lines.append(f"{domain}\tTRUE\t{c['path']}\t{secure}\t{exp}\t{c['name']}\t{c['value']}")
+          cookie_text = "\n".join(lines)
+          with open("cookies.txt", "w", encoding="utf-8") as f:
+              f.write(cookie_text)
 
-print(f"OK: 获取到 {len(cookies)} 个 cookie，已生成 cookies.txt")
-# 检查关键 cookie
-names = [c["name"] for c in cookies]
-print("关键 cookie 存在:", [k for k in ["VISITOR_INFO1_LIVE", "__Secure-YEC", "CONSENT"] if k in names])
-EOF
+          print(f"OK: 获取到 {len(cookies)} 个 cookie，已生成 cookies.txt")
+          names = [c["name"] for c in cookies]
+          print("关键 cookie 存在:", [k for k in ["VISITOR_INFO1_LIVE", "__Secure-YEC", "CONSENT"] if k in names])
+          PYEOF
 
       - name: Save cookies to repo secrets
         env:
           PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python - <<'EOF'
-import base64, json, os, urllib.request
-from nacl import encoding, public
+        run: |
+          python - <<'PYEOF'
+          import base64, json, os, urllib.request
+          from nacl import encoding, public
 
-token = os.environ["PAT_TOKEN"]
-repo = os.environ["GITHUB_REPOSITORY"]
-headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"}
+          token = os.environ["PAT_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"}
 
-with open("cookies.txt", "r", encoding="utf-8") as f:
-    cookie_text = f.read()
+          with open("cookies.txt", "r", encoding="utf-8") as f:
+              cookie_text = f.read()
 
-# 获取仓库公钥
-req = urllib.request.Request(f"https://api.github.com/repos/{repo}/actions/secrets/public-key", headers=headers)
-with urllib.request.urlopen(req) as r:
-    pk_data = json.load(r)
+          req = urllib.request.Request(f"https://api.github.com/repos/{repo}/actions/secrets/public-key", headers=headers)
+          with urllib.request.urlopen(req) as r:
+              pk_data = json.load(r)
 
-# 加密
-pk = public.PublicKey(pk_data["key"].encode(), encoding.Base64Encoder())
-encrypted = public.SealedBox(pk).encrypt(cookie_text.encode())
-enc_b64 = base64.b64encode(encrypted).decode()
+          pk = public.PublicKey(pk_data["key"].encode(), encoding.Base64Encoder())
+          encrypted = public.SealedBox(pk).encrypt(cookie_text.encode())
+          enc_b64 = base64.b64encode(encrypted).decode()
 
-# 写入 secret
-req = urllib.request.Request(
-    f"https://api.github.com/repos/{repo}/actions/secrets/YTDLP_COOKIES",
-    data=json.dumps({"encrypted_value": enc_b64, "key_id": pk_data["key_id"]}).encode(),
-    headers=headers, method="PUT")
-with urllib.request.urlopen(req) as r:
-    print(f"OK: YTDLP_COOKIES 已写入仓库 Secrets (HTTP {r.status})")
-EOF
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/actions/secrets/YTDLP_COOKIES",
+              data=json.dumps({"encrypted_value": enc_b64, "key_id": pk_data["key_id"]}).encode(),
+              headers=headers, method="PUT")
+          with urllib.request.urlopen(req) as r:
+              print(f"OK: YTDLP_COOKIES 已写入仓库 Secrets (HTTP {r.status})")
+          PYEOF
