@@ -43,10 +43,11 @@ jobs:
 
           lines = ["# Netscape HTTP Cookie File", "# HttpOnly_", ""]
           for c in cookies:
-              domain = c["domain"].lstrip(".")
+              domain = c["domain"]
+              include_sub = "TRUE" if domain.startswith(".") else "FALSE"
               secure = "TRUE" if c.get("secure") else "FALSE"
               exp = int(c.get("expires", 0)) or 0
-              lines.append(f"{domain}\tTRUE\t{c['path']}\t{secure}\t{exp}\t{c['name']}\t{c['value']}")
+              lines.append(f"{domain}\t{include_sub}\t{c['path']}\t{secure}\t{exp}\t{c['name']}\t{c['value']}")
           cookie_text = "\n".join(lines)
           with open("cookies.txt", "w", encoding="utf-8") as f:
               f.write(cookie_text)
