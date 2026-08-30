@@ -1,0 +1,58 @@
+name: Video Download
+
+# 手动触发：在仓库的 Actions 页面 -> Video Download -> Run workflow，粘贴视频链接
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "视频链接（yt-dlp 支持的任意站点）"
+        required: true
+      height:
+        description: "最高分辨率（720 / 1080 / 1440 ...）"
+        required: false
+        default: "1080"
+      extra_args:
+        description: "额外 yt-dlp 参数（可选，如 --write-subs --sub-langs en）"
+        required: false
+        default: ""
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Install yt-dlp & ffmpeg
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          pip install -U yt-dlp
+
+      - name: Download video
+        env:
+          # 可选：在仓库 Settings -> Secrets -> Actions 里配置 YTDLP_COOKIES
+          # 内容为浏览器导出的 Netscape 格式 cookies.txt 全文，用于绕过
+          # YouTube 对数据中心 IP 的风控（"Sign in to confirm you're not a bot"）
+          COOKIES: ${{ secrets.YTDLP_COOKIES }}
+          DL_URL: ${{ github.event.inputs.url }}
+          DL_HEIGHT: ${{ github.event.inputs.height }}
+          EXTRA_ARGS: ${{ github.event.inputs.extra_args }}
+        run: |
+          mkdir -p downloads
+          COOKIE_ARG=""
+          if [ -n "$COOKIES" ]; then
+            printf '%s\n' "$COOKIES" > cookies.txt
+            COOKIE_ARG="--cookies cookies.txt"
+          fi
+          yt-dlp $COOKIE_ARG $EXTRA_ARGS \
+            -f "bv*[height<=${DL_HEIGHT}]+ba/b" \
+            --merge-output-format mp4 \
+            -o "downloads/%(title).80s.%(ext)s" \
+            "$DL_URL"
+          ls -lh downloads/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: downloads/
+          retention-days: 3
+          if-no-files-found: error
