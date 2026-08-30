@@ -14,7 +14,7 @@ jobs:
           for inst in $INSTANCES; do
             result=$(curl -s --max-time 15 -X POST "https://$inst" \
               -H "Accept: application/json" -H "Content-Type: application/json" \
-              -d '{"url":"https://www.youtube.com/watch?v=jNQXAC9IVRw"}' 2>&1)
+              -d '{"url":"https://www.youtube.com/watch?v=jNQXAC9IVRw"}' 2>&1 || echo "CURL_FAIL_$?")
             echo "=== $inst ==="
             echo "$result" | head -c 300
             echo ""
